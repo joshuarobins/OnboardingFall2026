@@ -34,8 +34,42 @@ def sample_motion_model(particles, odom_prev, odom_now, rng):
     and replay it from the particle's own heading. Wrap the yaws. Reference: Probabilistic Robotics,
     table 5.6. Watch out when trans is nearly zero (turning in place) and when driving backward.
     """
-    raise NotImplementedError('sample_motion_model')
 
+    distance = np.hypot(odom_now[0] - odom_prev[0], odom_now[1] - odom_prev[1])
+
+    if distance > MIN_MOVE:
+        initial_yaw = wrap(math.atan2((odom_now[1]-odom_prev[1]), (odom_now[0]-odom_prev[0])) - odom_prev[2])
+        if abs(initial_yaw) > math.pi/2:
+            distance *= -1
+            initial_yaw = wrap(initial_yaw + math.pi)
+    else:
+        initial_yaw = 0
+        distance = 0
+        
+    final_yaw = wrap(wrap((odom_now[2]-odom_prev[2])) - initial_yaw)
+
+    (a1, a2, a3, a4) = ALPHAS
+
+    rot1_sd = np.sqrt(a1* initial_yaw**2 + a2 * distance**2)
+    trans_sd = np.sqrt(a3 * distance**2 + a4 * (initial_yaw**2 + final_yaw**2))
+    rot2_sd = np.sqrt(a1 * final_yaw**2 + a2 * distance**2)
+
+    rot1_noise = rng.normal(0.0, rot1_sd, len(particles))
+    trans_noise = rng.normal(0.0, trans_sd, len(particles))
+    rot2_noise = rng.normal(0.0, rot2_sd, len(particles))
+
+    noisy_rot1 = initial_yaw + rot1_noise
+    noisy_rot2 = final_yaw + rot2_noise
+    noisy_trans = distance + trans_noise
+
+    translated_particles = particles.copy()
+    translated_particles[:, 2] += noisy_rot1
+    translated_particles[:, 0] += noisy_trans * np.cos(translated_particles[:, 2])
+    translated_particles[:, 1] += noisy_trans * np.sin(translated_particles[:, 2])
+    translated_particles[:, 2] += noisy_rot2
+    translated_particles[:, 2] = wrap(translated_particles[:, 2])
+
+    return translated_particles
 
 def scan_log_likelihood(particles, ranges, angles, grid, laser_offset):
     """How well the scan fits the map from each particle. Returns an (N,) array of log-likelihoods.
